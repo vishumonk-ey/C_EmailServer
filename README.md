@@ -1,1 +1,1 @@
-# Email Server written in C .
+# Email Server written in C.
