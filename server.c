@@ -30,7 +30,7 @@
 #define USERNAME_SIZE 64
 #define PASSWORD_SIZE 128
 
-#define DATABASE_PATH "Database/users"
+#define DATABASE_PATH "Database/Users"
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 int send_response(
@@ -38,12 +38,91 @@ int send_response(
     uint8_t response_type , 
     char *message 
 ){
+    uint8_t *payload = NULL;
+    uint32_t payload_length = 0;
 
-    
+    if (message != NULL) {
+        payload_length = (uint32_t)strlen(message);
+        payload = (uint8_t *)message;
+    }
+
+    return vmp_send_frame(client_fd, response_type, payload, payload_length);
 }
 
 
-int handle_login(){
+void handle_login(int client_fd , VMPFrame *frame ){
+    size_t offset = 0;
+    char *username = NULL;
+    char *password = NULL;
+    // int logged_in = 0;
+
+    // read username because it would be in byte format
+    if(vmp_read_string(frame->payload , frame->payload_length , &offset , &username) < 0){
+        printf("error occured while reading the username !\n");
+        send_response(client_fd , RES_LOGIN_FAILED , "invalid request");
+        // goto cleanup;
+    }
+
+    // read pwd as it will be present in byte format
+    if(vmp_read_string(frame->payload , frame->payload_length , &offset , &password) < 0){
+        printf("error occured while reading the password!\n");
+        send_response(client_fd , RES_LOGIN_FAILED , "invalid request");
+    }
+
+    // build the user directory path: Database/users/<username>
+    char user_dir[PATH_MAX];
+    int n = snprintf(user_dir , sizeof(user_dir) , "%s/%s" , DATABASE_PATH , username);
+
+    // check whether the user directory exists
+    struct stat st;
+    if (stat(user_dir , &st) != 0 || !S_ISDIR(st.st_mode)) {
+        printf("user directory does not exist: %s\n", user_dir);
+        send_response(client_fd , RES_LOGIN_FAILED , "user not found");
+    }
+
+    // build the credentials file path: Database/users/<username>/credentials
+    char cred_path[PATH_MAX];
+    n = snprintf(cred_path , sizeof(cred_path) , "%s/credentials" , user_dir);
+    if (n < 0 || (size_t)n >= sizeof(cred_path)) {
+        send_response(client_fd , RES_LOGIN_FAILED , "credentials dont exists !");
+    }
+
+    // open the credentials file and check the third line (the password)
+    FILE *fp = fopen(cred_path , "r");
+    if (fp == NULL) {
+        printf("could not open credentials file: %s\n", cred_path);
+        send_response(client_fd , RES_LOGIN_FAILED , "Error");
+    }
+
+    char line[256];
+    int line_no = 0;
+    char stored_pwd[256] = {0};
+    while (fgets(line , sizeof(line) , fp) != NULL) {
+        line_no++;
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+        if (line_no == 3) {
+            strncpy(stored_pwd , line , sizeof(stored_pwd) - 1);
+            stored_pwd[sizeof(stored_pwd) - 1] = '\0';
+            break;
+        }
+    }
+    fclose(fp);
+
+    if (line_no < 3) {
+        printf("credentials file has no third line for user %s\n", username);
+        send_response(client_fd , RES_LOGIN_FAILED , "invalid credentials");
+        // goto cleanup;
+    }
+
+    // compare the supplied password with the third line of the file
+    if (strcmp(stored_pwd , password) != 0) {
+        printf("password mismatch for user %s\n", username);
+        send_response(client_fd , RES_LOGIN_FAILED , "invalid password");
+    }
+    send_response(client_fd , RES_LOGIN_OK , "login successful");
 
 }
 
@@ -60,32 +139,33 @@ void *client_handler(void *args){
         
         switch(frame.type){
             case REQ_LOGIN:
-                handle_login(
-                    
-                )
+                handle_login(client_fd , &frame);
                 break;
             default:
-                send_response(client_fd ,);
+                send_response(client_fd , RES_ERROR , NULL);
                 break;
         }
     }
 }
 
 int main(){
+    printf("HEYYYY\n");
     int serverfd = socket(AF_INET,SOCK_STREAM,0);
     struct sockaddr_in serveraddr;
     serveraddr.sin_family = AF_INET;
     serveraddr.sin_port = htons(PORT);
     serveraddr.sin_addr.s_addr = INADDR_ANY;
     
-    if (bind(serverfd , (struct sockaddr*)&server_addr , sizeof(server_addr)) < 0){
-        printf("error while binding");
+    if (bind(serverfd , (struct sockaddr*)&serveraddr , sizeof(serveraddr)) < 0){
+        printf("error while binding\n");
         return -1 ;
     }
     
     if(listen(serverfd , 5 ) < 0){
-        printf("error while listening!");
+        printf("error while listening!\n");
     }
+
+    printf("Server successfully running on port %d\n" ,PORT);
 
     while(1){
         struct sockaddr_in clientaddr;
@@ -94,7 +174,7 @@ int main(){
         int clientfd = accept(serverfd , (struct sockaddr *)&clientaddr , &client_len);
 
         int *thread_args = malloc(sizeof(clientfd));
-        *thread_args = client_fd;
+        *thread_args = clientfd;
 
         pthread_t thread ;
 

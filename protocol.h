@@ -57,7 +57,7 @@ int vmp_send_frame(
 
 int vmp_recv_frame(int sock, VMPFrame *frame);
 
-void vmp_free_frame(VMPFrame *frame);
+int vmp_free_frame(VMPFrame *frame);
 
 /* Payload encoding */
 int vmp_append_string(

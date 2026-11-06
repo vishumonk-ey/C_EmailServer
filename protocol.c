@@ -27,7 +27,7 @@ int send_all(int sock, const void *buffer, size_t length){
             ptr + total_sent ,
             length - total_sent , 
             0
-        )  
+        );  
         
         if ( sent < 0 ){
             if (errno == EINTR){
@@ -35,7 +35,7 @@ int send_all(int sock, const void *buffer, size_t length){
             }
             return -1;
         }
-        total_sent += sent
+        total_sent += sent;
     }
     return -1;
 }
@@ -57,7 +57,7 @@ int send_all(int sock, const void *buffer, size_t length){
             ptr + total_recieved ,
             length - total_recieved ,
             0
-        )
+        );
 
         if (recieved < 0){
             if (errno == EINTR){
@@ -81,11 +81,13 @@ int vmp_send_frame(
     uint32_t payload_length
 ){
     if ( payload_length > VMP_MAX_PAYLOAD ){
+        printf("payload length greater than max allowed \n");
         errno = EMSGSIZE;
-        return -1
+        return -1;
     }
 
     if ( payload_length > 0 && payload == NULL){
+        printf("payload is null \n");
         errno = EINVAL;
         return -1 ;
     }
@@ -108,10 +110,12 @@ int vmp_send_frame(
 
     // sending header first
     if ( send_all(sock , header , VMP_HEADER_SIZE) < 0){
+        printf("error in sending the header\n");
         return -1;
     }
     // send the payload
     if ( send_all(sock,payload,payload_length) < 0){
+        printf("error in sending the payload\n");
         return -1;
     }
 
@@ -186,7 +190,7 @@ int vmp_free_frame(VMPFrame *frame){
     if( frame == NULL){
         return -1;
     }
-    free(frame->payload)
+    free(frame->payload);
     return 1;
 }
 

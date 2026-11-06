@@ -1,0 +1,2 @@
+CompileFlags:
+  Compiler: /usr/bin/gcc  # <--- REPLACE THIS with your path from Step 2
