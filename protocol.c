@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <sys/types.h>
 
 
 /*
@@ -22,7 +23,7 @@ int send_all(int sock, const void *buffer, size_t length){
     const uint8_t *ptr = (const uint8_t *)buffer;
     size_t total_sent = 0 ;
     while(total_sent < length){
-        size_t sent = send(
+        ssize_t sent = send(
             sock ,
             ptr + total_sent ,
             length - total_sent , 
@@ -37,7 +38,7 @@ int send_all(int sock, const void *buffer, size_t length){
         }
         total_sent += sent;
     }
-    return -1;
+    return 0;
 }
 
 /*
@@ -50,8 +51,9 @@ int send_all(int sock, const void *buffer, size_t length){
 
  int recv_all(int sock, void *buffer, size_t length){
     uint8_t *ptr = (uint8_t *)buffer;
-    size_t total_recieved = 0;
+    ssize_t total_recieved = 0;
     while( total_recieved < length){
+        printf("trying to still recieve %zd\n",total_recieved);
         size_t recieved = recv(
             sock , 
             ptr + total_recieved ,
@@ -60,11 +62,13 @@ int send_all(int sock, const void *buffer, size_t length){
         );
 
         if (recieved < 0){
+            printf("error in single recv()\n");
             if (errno == EINTR){
                 continue;
             }
             return -1;
         }
+        total_recieved += recieved;
     }
     return 0;
  }
@@ -132,6 +136,7 @@ int vmp_recv_frame(int sock, VMPFrame *frame) {
     uint8_t header[VMP_HEADER_SIZE];
 
     if( recv_all(sock , header , VMP_HEADER_SIZE) < 0){
+        printf("error in recieving the header\n");
         return -1;
     }
 

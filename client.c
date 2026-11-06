@@ -21,6 +21,7 @@ int sendLoginReq(int clientfd,const char *username , const char *password){
         username
     ) < 0){
         printf("username appending error! \n");
+        return -1;
     }
 
     if(vmp_append_string(
@@ -30,21 +31,64 @@ int sendLoginReq(int clientfd,const char *username , const char *password){
         password
     ) < 0){
         printf("username appending error! \n");
+        return -1;
     }
-
 
     if(vmp_send_frame(clientfd , REQ_LOGIN , payload , (uint32_t)offset) < 0){
         printf("Error while sending frame\n");
+        return -1;
     }
 
     // recieve response - create a new function for recieving response !
     return 1;
 }
 
+int sendRegisterReq(int clientfd , const char *username , const char *email , const char *password){
+    uint8_t payload[VMP_MAX_PAYLOAD];
+    size_t offset = 0;
+
+    if(vmp_append_string(
+        payload,
+        sizeof(payload),
+        &offset,
+        username
+    ) < 0){
+        printf("username appending error! \n");
+        return -1;
+    }
+
+    if(vmp_append_string(
+        payload,
+        sizeof(payload),
+        &offset,
+        email
+    ) < 0){
+        printf("email appending error! \n");
+        return -1;
+    }
+
+    if(vmp_append_string(
+        payload,
+        sizeof(payload),
+        &offset,
+        password
+    ) < 0){
+        printf("password appending error! \n");
+        return -1;
+    }
+
+    if(vmp_send_frame(clientfd , REQ_REGISTER , payload , (uint32_t)offset) < 0){
+        printf("Error while sending frame\n");
+        return -1;
+    } 
+    // recieve response 
+    return 1;
+}
+
 int main(){
     int client_fd = socket(AF_INET , SOCK_STREAM , 0 );
     if ( client_fd < 0 ){
-        printf("error while creating the client ! \n");
+        printf("error while creating the client !\n");
     }
     struct sockaddr_in serveraddr;
     serveraddr.sin_family  = AF_INET;
@@ -54,8 +98,11 @@ int main(){
     if(connect(client_fd , (struct sockaddr *)&serveraddr,sizeof(serveraddr)) < 0){
         printf("error while connecting\n");
     }
-    const char *username = "Vishal";
+    const char *username = "Lipika";
     const char *password = "pwd123";
-    sendLoginReq(client_fd , username , password);
+    const char *email = "lipika@gmail.com";
 
+    sendRegisterReq(client_fd , username , email ,password);
+    printf("DOne\n");
+    return 0;
 }
