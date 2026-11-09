@@ -33,12 +33,13 @@
 #define PASSWORD_SIZE 128
 
 #define DATABASE_PATH "Database/Users"
+#define MAIL_PATH "Database/Mails"
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 int send_response(
-    int client_fd , 
-    uint8_t response_type , 
-    char *message 
+    int client_fd ,
+    uint8_t response_type ,
+    char *message
 ){
     uint8_t *payload = NULL;
     uint32_t payload_length = 0;
@@ -129,7 +130,7 @@ void handle_login(int client_fd , VMPFrame *frame ){
         printf("Login request came from %s with pwd %s and was success !\n",username , password);
         send_response(client_fd , RES_LOGIN_OK , "login successful");
     }
-    
+
 
 }
 
@@ -196,7 +197,7 @@ int handle_register(int client_fd , VMPFrame *frame){
         fflush(file_ptr);
 
         fprintf(file_ptr ,"%s\n", password);
-        
+
         fclose(file_ptr);
 
         pthread_mutex_unlock(&mutex);
@@ -207,6 +208,72 @@ int handle_register(int client_fd , VMPFrame *frame){
 
 
 }
+
+// sending message
+int handle_sending(int client_fd , VMPFrame *frame){
+    // payload format --> [][sender] [][reciever] [][subject] [][body]
+    char *senderUsername = NULL;
+    char *recieverUsername = NULL;
+    char *subject = NULL;
+    char *body = NULL;
+
+    size_t offset = 0;
+
+    if(vmp_read_string(frame->payload , frame->payload_length , &offset , &senderUsername) < 0){
+        printf("reading sender username error \n");
+        return -1;
+    }
+
+    if(vmp_read_string(frame->payload , frame->payload_length , &offset , &recieverUsername) < 0){
+        printf("reading reciever username error \n");
+        return -1;
+    }
+
+    if(vmp_read_string(frame->payload , frame->payload_length , &offset , &subject) < 0){
+        printf("reading subject error \n");
+        return -1;
+    }
+
+    if(vmp_read_string(frame->payloaad , frame->payload_length , &offset , &body) < 0){
+        printf("reading body error \n");
+        return -1;
+    }
+
+    char senderPath[PATH_MAX];
+    snprintf(senderPath , sizeof(senderPath) , "%s/%s" , DATABASE_PATH , senderUsername);
+
+    char recieverPath[PATH_MAX];
+    snprintf(recieverPath , sizeof(recieverPath) , "%s/%s" , DATABASE_PATH , recieverUsername);
+
+    struct stat st;
+
+    if (stat(senderPath , &st) != 0) {
+        printf("Sender doesnt exist: %s\n", senderUsername);
+        send_response(client_fd , RES_LOGIN_FAILED , "user doesnt exists");
+        return -1;
+    }else if(stat(recieverPath ,&st) != 0){
+        printf("reciever doesnt exist: %s\n", senderUsername);
+        send_response(client_fd , RES_LOGIN_FAILED , "reciever doesnt exists");
+        return -1;
+    }
+
+    // insert mail in the mail folder , generate a unique mail id and send it to sent and recieve section of the sender and recieve
+
+    FILE *file = fopen("Database/Mails/count","r");
+    char count[INT_MAX];
+    if(fgets(count , INT_MAX , file) < 0){
+        printf("reading count error\n");
+        return -1;
+    }
+    count
+
+
+
+
+
+
+}
+
 void *client_handler(void *args){
     // printf("thread routine called!\n");
     int client_fd = *(int *)args;
@@ -222,7 +289,7 @@ void *client_handler(void *args){
         }else{
             printf("Client frame recieved successfully!\n");
         }
-        
+
         switch(frame.type){
             case REQ_LOGIN:
                 // printf("handle login matched in case\n");
@@ -246,12 +313,12 @@ int main(){
     serveraddr.sin_family = AF_INET;
     serveraddr.sin_port = htons(PORT);
     serveraddr.sin_addr.s_addr = INADDR_ANY;
-    
+
     if (bind(serverfd , (struct sockaddr*)&serveraddr , sizeof(serveraddr)) < 0){
         printf("error while binding\n");
         return -1 ;
     }
-    
+
     if(listen(serverfd , 5 ) < 0){
         printf("error while listening!\n");
     }
@@ -275,7 +342,7 @@ int main(){
             &thread ,
             NULL ,
             client_handler,
-            thread_args 
+            thread_args
         ) != 0 ){
             printf("error while creating thread!\n");
             free(thread_args);
