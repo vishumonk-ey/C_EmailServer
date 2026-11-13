@@ -1,4 +1,7 @@
 #include <iso646.h>
+// #include <iterator>
+#include <stddef.h>
+#include <threads.h>
 #define _POSIX_C_SOURCE 200809L
 
 #include "protocol.h"
@@ -18,16 +21,20 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <netinet/in.h>
+#include<stdbool.h>
 
 #define PORT 5555
 
 #define REQ_LOGIN       0x02
+#define REQ_READ        0x05
+#define REQ_SENT        0x06
 #define REQ_LOGOUT      0x07
 
 #define RES_LOGIN_OK      0x81
 #define RES_LOGIN_FAILED  0x82
 #define RES_OK            0x83
 #define RES_ERROR         0xFF
+#define REQ_SEND          0x03
 
 #define USERNAME_SIZE 64
 #define PASSWORD_SIZE 128
@@ -211,67 +218,306 @@ int handle_register(int client_fd , VMPFrame *frame){
 
 // sending message
 int handle_sending(int client_fd , VMPFrame *frame){
-    // payload format --> [][sender] [][reciever] [][subject] [][body]
+    printf("entered in handle sending\n");
+    // payload format --> [][sender] [][no. of recievers][][reciever].... [][subject] [][body]
     char *senderUsername = NULL;
-    char *recieverUsername = NULL;
     char *subject = NULL;
     char *body = NULL;
+    char *recieverCount = NULL;
 
     size_t offset = 0;
-
+    printf("trying to read sender username\n");
     if(vmp_read_string(frame->payload , frame->payload_length , &offset , &senderUsername) < 0){
         printf("reading sender username error \n");
         return -1;
     }
 
-    if(vmp_read_string(frame->payload , frame->payload_length , &offset , &recieverUsername) < 0){
-        printf("reading reciever username error \n");
+    if(vmp_read_string(frame->payload , frame->payload_length , &offset , &recieverCount) < 0){
+        printf("reading reciever count error \n");
         return -1;
     }
 
+    int recieverCountInt = atoi(recieverCount);
+
+    // initialize an array to store reciever usernames
+    char **recieverUsernames = malloc(recieverCountInt * sizeof(char *));
+    printf("recieverCountInt: %d\n" , recieverCountInt);
+    for(int i = 0; i < recieverCountInt; i++){
+        printf("running\n");
+        recieverUsernames[i] = malloc(PATH_MAX * sizeof(char));
+        if(vmp_read_string(frame->payload , frame->payload_length , &offset , &recieverUsernames[i]) < 0){
+            printf("reading reciever username error \n");
+            return -1;
+        }
+    }
+    // printf("recieverUsernames: %s\n" , recieverUsernames[0]);
+    // printf("recieverUsernames: %s\n" , recieverUsernames[1]);
     if(vmp_read_string(frame->payload , frame->payload_length , &offset , &subject) < 0){
         printf("reading subject error \n");
         return -1;
     }
 
-    if(vmp_read_string(frame->payloaad , frame->payload_length , &offset , &body) < 0){
+    if(vmp_read_string(frame->payload , frame->payload_length , &offset , &body) < 0){
         printf("reading body error \n");
         return -1;
     }
 
     char senderPath[PATH_MAX];
     snprintf(senderPath , sizeof(senderPath) , "%s/%s" , DATABASE_PATH , senderUsername);
-
-    char recieverPath[PATH_MAX];
-    snprintf(recieverPath , sizeof(recieverPath) , "%s/%s" , DATABASE_PATH , recieverUsername);
-
     struct stat st;
-
     if (stat(senderPath , &st) != 0) {
-        printf("Sender doesnt exist: %s\n", senderUsername);
-        send_response(client_fd , RES_LOGIN_FAILED , "user doesnt exists");
-        return -1;
-    }else if(stat(recieverPath ,&st) != 0){
-        printf("reciever doesnt exist: %s\n", senderUsername);
-        send_response(client_fd , RES_LOGIN_FAILED , "reciever doesnt exists");
-        return -1;
+            printf("Sender doesnt exist: %s\n", senderUsername);
+            send_response(client_fd , RES_LOGIN_FAILED , "user doesnt exists");
+            return -1;
     }
+    int genuineRecipients = 0;
+    bool successfullySent = false;
+    bool mailCreated = false;
 
-    // insert mail in the mail folder , generate a unique mail id and send it to sent and recieve section of the sender and recieve
 
-    FILE *file = fopen("Database/Mails/count","r");
-    char count[INT_MAX];
-    if(fgets(count , INT_MAX , file) < 0){
+    // printf("opening the count file \n");
+    FILE *file = fopen("Database/Mails/count","r+");
+    char count[32];
+    pthread_mutex_lock(&mutex);
+    if(fgets(count , sizeof(count) , file) < 0){
         printf("reading count error\n");
         return -1;
     }
-    count
+    int countInt = atoi(count);
+    char mailPath[PATH_MAX];
+    snprintf(mailPath , sizeof(mailPath) , "Database/Mails/%d" , countInt + 1);
+    for (int i = 0 ; i < recieverCountInt ; i++){
+        char recieverPath[PATH_MAX];
+        snprintf(recieverPath , sizeof(recieverPath) , "%s/%s" , DATABASE_PATH , recieverUsernames[i]);
+
+        struct stat st;
+        if(stat(recieverPath ,&st) != 0){
+            printf("reciever doesnt exist: %s\n", senderUsername);
+            continue;
+        }else{
+            genuineRecipients++;
+        }
 
 
+        if (genuineRecipients != 0 && mailCreated == false) {
+            FILE *mailFile = fopen(mailPath , "w");
+            if(mailFile == NULL){
+                printf("creating mail file error\n");
+                return -1;
+            }
+                   // paste the subject and body as it is
+            fprintf(mailFile , "Subject : %s\n" , subject);
+            fprintf(mailFile , "Body : %s\n" , body);
+            fprintf(mailFile , "Sent by : %s\n" , senderUsername);
+            fclose(mailFile);
 
+            rewind(file);
+            fprintf(file , "%d" , countInt + 1);
+            mailCreated = true;
+        }
+        // pthread_mutex_unlock(&mutex);
+        if(mailCreated == true){
+            // create entry in the recieve section of the reciever
+            char recieverSentPath[PATH_MAX];
+            snprintf(recieverSentPath , sizeof(recieverSentPath) , "Database/Users/%s/Recieved" , recieverUsernames[i]);
 
+            FILE *recieverSentFile = fopen(recieverSentPath , "a");
+            if(recieverSentFile == NULL){
+                printf("creating reciever sent file error\n");
+                pthread_mutex_unlock(&mutex);
+                return -1;
+            }
 
+            fprintf(recieverSentFile , "\n %d , %s" , countInt + 1 ,subject);
+            fclose(recieverSentFile);
+            successfullySent = true;
 
+        }
+
+    }
+    fclose(file);
+    if(successfullySent == true){
+        char userSentPath[PATH_MAX];
+        snprintf(userSentPath , sizeof(userSentPath) , "Database/Users/%s/Sent" , senderUsername);
+
+        FILE *userSentFile = fopen(userSentPath , "a");
+        if(userSentFile == NULL){
+            printf("creating user sent file error\n");
+            pthread_mutex_unlock(&mutex);
+            return -1;
+        }
+
+        fprintf(userSentFile , "\n %d" , countInt + 1);
+        fclose(userSentFile);
+    }
+    pthread_mutex_unlock(&mutex);
+    // insert mail in the mail folder , generate a unique mail id and send it to sent and recieve section of the sender and recieve
+    send_response(client_fd , RES_OK , "Mail sent successfully!");
+    return 1;
+}
+
+int see_inbox(int client_fd , VMPFrame *frame)
+{
+    char *userName = NULL;
+    size_t offset = 0;
+
+    if( vmp_read_string(frame->payload, frame->payload_length, &offset, &userName) < 0){
+        printf("reading username error \n");
+        return -1;
+    }
+
+    char userInboxPath[256];
+    sprintf(userInboxPath, "Database/Users/%s/Recieved", userName);
+    uint8_t payload[VMP_MAX_PAYLOAD];
+    FILE *file = fopen(userInboxPath, "rb");
+
+    if(file == NULL){
+        printf("inbox not found\n");
+        send_response(client_fd, RES_ERROR, "Empty Inbox");
+        return -1;
+    }
+
+    pthread_mutex_lock(&mutex);
+    size_t length = fread(payload, 1, sizeof(payload), file);
+    int read_failed = ferror(file);
+
+    /* Detect an oversized file instead of silently truncating it. */
+    int extra = EOF;
+    if (!read_failed && length == sizeof(payload)) {
+        extra = fgetc(file);
+        read_failed = ferror(file);
+    }
+    fclose(file);
+    pthread_mutex_unlock(&mutex);
+
+    if(read_failed){
+        printf("read failed\n");
+        return -1;
+    }
+
+    if(extra != EOF){
+        printf("oversized file\n");
+        return -1;
+    }
+
+    if(vmp_send_frame(client_fd, RESP_INBOX, payload, length) < 0){
+        printf("response send failed\n");
+        return -1;
+    }
+
+    return 1;
+}
+
+int see_sentMails(int client_fd , VMPFrame *frame) {
+    char *userName = NULL;
+    size_t offset = 0;
+
+    if (vmp_read_string(frame->payload, frame->payload_length, &offset, &userName) < 0) {
+        printf("reading username error \n");
+        return -1;
+    }
+
+    char userSentPath[256];
+    sprintf(userSentPath, "Database/Users/%s/Sent", userName);
+    uint8_t payload[VMP_MAX_PAYLOAD];
+    FILE *file = fopen(userSentPath, "rb");
+
+    if (file == NULL) {
+        printf("sent mails not found\n");
+        send_response(client_fd, RES_ERROR, "Empty Sent");
+        free(userName);
+        return -1;
+    }
+
+    pthread_mutex_lock(&mutex);
+    size_t length = fread(payload, 1, sizeof(payload), file);
+    int read_failed = ferror(file);
+
+    /* Detect an oversized file instead of silently truncating it. */
+    int extra = EOF;
+    if (!read_failed && length == sizeof(payload)) {
+        extra = fgetc(file);
+        read_failed = ferror(file);
+    }
+    fclose(file);
+    pthread_mutex_unlock(&mutex);
+
+    if (read_failed) {
+        printf("read failed\n");
+        free(userName);
+        return -1;
+    }
+
+    if (extra != EOF) {
+        printf("oversized file\n");
+        free(userName);
+        return -1;
+    }
+
+    if (vmp_send_frame(client_fd, RES_OK, payload, length) < 0) {
+        printf("response send failed\n");
+        free(userName);
+        return -1;
+    }
+
+    free(userName);
+    return 1;
+}
+
+int see_mail(int client_fd, VMPFrame *frame) {
+    char *mailId = NULL;
+    size_t offset = 0;
+
+    if (vmp_read_string(frame->payload, frame->payload_length, &offset, &mailId) < 0) {
+        printf("reading mail id error \n");
+        return -1;
+    }
+
+    char mailPath[256];
+    sprintf(mailPath, "Database/Mails/%s", mailId);
+    uint8_t payload[VMP_MAX_PAYLOAD];
+    FILE *file = fopen(mailPath, "rb");
+
+    if (file == NULL) {
+        printf("mail not found: %s\n", mailPath);
+        send_response(client_fd, RES_ERROR, "Mail not found");
+        free(mailId);
+        return -1;
+    }
+
+    pthread_mutex_lock(&mutex);
+    size_t length = fread(payload, 1, sizeof(payload), file);
+    int read_failed = ferror(file);
+
+    /* Detect an oversized file instead of silently truncating it. */
+    int extra = EOF;
+    if (!read_failed && length == sizeof(payload)) {
+        extra = fgetc(file);
+        read_failed = ferror(file);
+    }
+    fclose(file);
+    pthread_mutex_unlock(&mutex);
+
+    if (read_failed) {
+        printf("read failed\n");
+        free(mailId);
+        return -1;
+    }
+
+    if (extra != EOF) {
+        printf("oversized file\n");
+        free(mailId);
+        return -1;
+    }
+
+    if (vmp_send_frame(client_fd, RES_OK, payload, length) < 0) {
+        printf("response send failed\n");
+        free(mailId);
+        return -1;
+    }
+
+    free(mailId);
+    return 1;
 }
 
 void *client_handler(void *args){
@@ -298,6 +544,22 @@ void *client_handler(void *args){
 
             case REQ_REGISTER:
                 handle_register(client_fd, &frame);
+                break;
+            case REQ_SEND:
+                printf("handle send matched in case\n");
+                handle_sending(client_fd, &frame);
+                break;
+            case REQ_INBOX:
+                printf("handle inbox matched in case\n");
+                see_inbox(client_fd, &frame);
+                break;
+            case REQ_READ:
+                printf("handle read mail matched in case\n");
+                see_mail(client_fd, &frame);
+                break;
+            case REQ_SENT:
+                printf("handle sent mails matched in case\n");
+                see_sentMails(client_fd, &frame);
                 break;
             default:
                 send_response(client_fd , RES_ERROR , NULL);

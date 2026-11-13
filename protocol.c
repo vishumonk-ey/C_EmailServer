@@ -26,10 +26,10 @@ int send_all(int sock, const void *buffer, size_t length){
         ssize_t sent = send(
             sock ,
             ptr + total_sent ,
-            length - total_sent , 
+            length - total_sent ,
             0
-        );  
-        
+        );
+
         if ( sent < 0 ){
             if (errno == EINTR){
                 continue;
@@ -55,7 +55,7 @@ int send_all(int sock, const void *buffer, size_t length){
     while( total_recieved < length){
         printf("trying to still recieve %zd\n",total_recieved);
         size_t recieved = recv(
-            sock , 
+            sock ,
             ptr + total_recieved ,
             length - total_recieved ,
             0
@@ -66,6 +66,9 @@ int send_all(int sock, const void *buffer, size_t length){
             if (errno == EINTR){
                 continue;
             }
+            return -1;
+        }else if(recieved == 0){
+            printf("connection closed by peer\n");
             return -1;
         }
         total_recieved += recieved;
@@ -107,7 +110,7 @@ int vmp_send_frame(
     uint32_t network_length = htonl(payload_length);
 
     memcpy(
-        header + 4 , 
+        header + 4 ,
         &network_length ,
         sizeof(network_length)
     );
@@ -161,7 +164,7 @@ int vmp_recv_frame(int sock, VMPFrame *frame) {
     payload_length = ntohl(payload_length);
 
     uint8_t *payload = NULL;
-    
+
     if( payload_length > VMP_MAX_PAYLOAD){
         errno = EMSGSIZE;
         return -1;
@@ -174,7 +177,7 @@ int vmp_recv_frame(int sock, VMPFrame *frame) {
         if(payload == NULL){
             return -1;
         }
-        
+
         if( recv_all(sock , payload , payload_length) < 0){
             return -1;
         }

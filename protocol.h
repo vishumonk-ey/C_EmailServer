@@ -30,6 +30,7 @@
 #define RESP_LOGIN_OK     0x81
 #define RESP_LOGIN_FAILED 0x82
 #define RESP_OK           0x83
+#define RESP_INBOX        0x84
 #define RESP_ERROR        0xFF
 
 /* Decoded message */
